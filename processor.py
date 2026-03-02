@@ -80,16 +80,14 @@ def run_imposition_wizard(iw_path: str, preset_name: str,
     )
 
     try:
-        # Сначала сменить кодировку консоли на cp1251 (Windows Cyrillic)
-        # Затем запустить команду
-        full_cmd = f'chcp 1251 >nul 2>&1 && {cmd}'
-        
+        # Запустить процесс через shell для корректной обработки кавычек
+        # Использовать cp866 (OEM кодировка русской консоли)
         result = subprocess.run(
-            full_cmd,
+            cmd,
             shell=True,
             capture_output=True,
             text=True,
-            encoding='utf-8',  # После chcp 1251 вывод будет в UTF-8
+            encoding='cp866',  # OEM кодировка Windows для русского языка
             errors='replace',
             timeout=300  # 5 минут таймаут
         )
@@ -99,10 +97,37 @@ def run_imposition_wizard(iw_path: str, preset_name: str,
 
         if result.returncode != 0:
             error_msg = result.stderr or result.stdout or f"Код ошибки: {result.returncode}"
-            logger.error(f"ImpositionWizard вернул ошибку: {error_msg}")
-            raise ProcessorError(
-                f"ImpositionWizard вернул ошибку {result.returncode}: {error_msg}"
+            # Очистить сообщение от мусора кодировки
+            error_msg_clean = error_msg.encode('cp866', errors='replace').decode('cp866', errors='replace')
+            
+            # Проверить на предупреждения (не критичные ошибки)
+            is_warning = (
+                'Preflight failed' in error_msg and (
+                    'Неподдерживаемые PDF элементы' in error_msg_clean or
+                    'Аннотации' in error_msg_clean or
+                    'размер trim box' in error_msg_clean or
+                    'PDF аннотации найдены' in error_msg_clean
+                )
             )
+            
+            if is_warning:
+                # Это предупреждение - логируем но продолжаем
+                logger.warning(f"ImpositionWizard предупреждение: {error_msg_clean[:200]}")
+                # Копировать входной файл в выходной если обработка не удалась
+                import shutil
+                try:
+                    shutil.copy2(pdf_path, output_pdf)
+                    logger.info(f"Файл скопирован без обработки: {output_pdf}")
+                    return output_pdf
+                except Exception as copy_err:
+                    logger.error(f"Не удалось скопировать файл: {copy_err}")
+                    raise ProcessorError(f"ImpositionWizard вернул ошибку {result.returncode}: {error_msg_clean[:200]}")
+            else:
+                # Критическая ошибка
+                logger.error(f"ImpositionWizard вернул ошибку: {error_msg_clean}")
+                raise ProcessorError(
+                    f"ImpositionWizard вернул ошибку {result.returncode}: {error_msg_clean[:200]}"
+                )
 
         logger.info(f"Успешно создан {output_pdf}")
         return output_pdf

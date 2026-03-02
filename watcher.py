@@ -64,10 +64,10 @@ class FolderWatcher:
 
 class FileHandler(FileSystemEventHandler):
     """Обработчик событий файловой системы."""
-    
+
     # Поддерживаемые расширения
     SUPPORTED_EXTENSIONS = IMAGE_EXTENSIONS | {PDF_EXTENSION}
-    
+
     def __init__(self, folder_config: FolderConfig, iw_path: str,
                  on_success: Optional[Callable] = None,
                  on_error: Optional[Callable] = None):
@@ -77,13 +77,29 @@ class FileHandler(FileSystemEventHandler):
         self.on_success = on_success
         self.on_error = on_error
         self._processing_files = set()
+        self._existing_files = set()  # Файлы которые уже были при старте
+        self._populate_existing_files()
     
+    def _populate_existing_files(self):
+        """Запомнить существующие файлы чтобы не обрабатывать их при старте."""
+        try:
+            input_path = Path(self.folder_config.input_path)
+            if input_path.exists():
+                for ext in self.SUPPORTED_EXTENSIONS:
+                    for file in input_path.glob(f'*{ext}'):
+                        self._existing_files.add(str(file))
+                    for file in input_path.glob(f'*{ext.upper()}'):
+                        self._existing_files.add(str(file))
+                logger.debug(f"Найдено {len(self._existing_files)} существующих файлов в {input_path}")
+        except Exception as e:
+            logger.warning(f"Ошибка при сканировании существующих файлов: {e}")
+
     def _should_process(self, file_path: Path) -> bool:
         """Проверить, нужно ли обрабатывать файл."""
         # Проверить что файл существует
         if not file_path.exists():
             return False
-        
+
         # Проверить расширение
         if file_path.suffix.lower() not in self.SUPPORTED_EXTENSIONS:
             return False
@@ -94,6 +110,11 @@ class FileHandler(FileSystemEventHandler):
 
         # Проверить, не обрабатывается ли уже
         if str(file_path) in self._processing_files:
+            return False
+        
+        # Проверить, не был ли этот файл создан до запуска приложения
+        if str(file_path) in self._existing_files:
+            logger.debug(f"Пропускаем существующий файл: {file_path}")
             return False
 
         return True

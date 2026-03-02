@@ -1,0 +1,22 @@
+{
+  "folders": [
+    {
+      "name": "A4",
+      "input_path": "C:/Users/user/Desktop/A4",
+      "output_path": "C:/Users/user/Desktop/Print",
+      "preset_name": "A4",
+      "enabled": true,
+      "delete_original": true
+    },
+    {
+      "name": "A5",
+      "input_path": "C:/Users/user/Desktop/A5",
+      "output_path": "C:/Users/user/Desktop/Print",
+      "preset_name": "A5",
+      "enabled": true,
+      "delete_original": true
+    }
+  ],
+  "imposition_wizard_path": "C:\\Program Files\\Appsforlife\\Imposition Wizard 3\\ImpositionWizard.exe",
+  "auto_start": true
+}

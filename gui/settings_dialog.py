@@ -14,6 +14,7 @@ from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QColor, QPixmap, QIcon
 
 from config import config, FolderConfig
+from autostart import update_auto_start
 
 
 class FolderEditDialog(QDialog):
@@ -616,5 +617,8 @@ class SettingsDialog(QDialog):
         config.imposition_wizard_path = self.iw_path_edit.text().strip() or "ImpositionWizard"
         config.auto_start = self.auto_start_check.isChecked()
         config.save()
-        
+
+        # Применить настройку автозапуска
+        update_auto_start(config.auto_start)
+
         self.accept()
