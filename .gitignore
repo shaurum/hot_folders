@@ -1,0 +1,65 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# PyInstaller
+*.manifest
+*.spec.bak
+
+# Виртуальные окружи
+venv/
+env/
+ENV/
+.venv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Логи
+*.log
+hot_folders.log
+
+# Конфигурация (если содержит персональные данные)
+# config.json
+
+# Временные файлы
+*.tmp
+*.temp
+~$*
+
+# ОС
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Скомпилированные файлы
+*.obj
+*.exe
+*.dll
+*.so
+*.pyd
+
+# Архивы для передачи
+*_Distribution.zip
