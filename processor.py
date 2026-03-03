@@ -3,6 +3,7 @@
 Конвертация изображений в PDF и вызов ImpositionWizard.
 """
 import os
+import sys
 import subprocess
 import tempfile
 from pathlib import Path
@@ -73,22 +74,63 @@ def run_imposition_wizard(iw_path: str, preset_name: str,
     Returns:
         Путь к созданному PDF файлу
     """
-    # Сформировать команду как строку для корректной обработки путей с пробелами
-    cmd = (
-        f'"{iw_path}" --impose --project="{preset_name}" '
-        f'"{input_pdf}" "{output_pdf}"'
-    )
+    # Запускать без shell, чтобы избежать проблем с кавычками и наследованием лишнего окружения.
+    cmd = [
+        iw_path,
+        "--impose",
+        f"--project={preset_name}",
+        str(input_pdf),
+        str(output_pdf),
+    ]
+
+    env = os.environ.copy()
+    for var in (
+        "QT_PLUGIN_PATH",
+        "QT_QPA_PLATFORM_PLUGIN_PATH",
+        "QT_QPA_FONTDIR",
+        "QT_QPA_PLATFORMTHEME",
+        "QML2_IMPORT_PATH",
+        "PYTHONHOME",
+        "PYTHONPATH",
+    ):
+        env.pop(var, None)
+
+    iw_dir = ""
+    iw_path_obj = Path(iw_path)
+    if iw_path_obj.parent != Path("."):
+        iw_dir = str(iw_path_obj.resolve().parent)
+        # Для внешнего Qt-приложения его папка должна быть первой в PATH,
+        # чтобы подхватились "родные" DLL, а не из _MEIPASS.
+        env["PATH"] = iw_dir + os.pathsep + env.get("PATH", "")
+
+    if getattr(sys, "frozen", False):
+        meipass = getattr(sys, "_MEIPASS", "")
+        if meipass:
+            normalized_meipass = os.path.normcase(os.path.abspath(meipass))
+            path_parts = env.get("PATH", "").split(os.pathsep)
+            cleaned_parts = []
+            for part in path_parts:
+                if not part:
+                    continue
+                normalized_part = os.path.normcase(os.path.abspath(part))
+                if normalized_part == normalized_meipass:
+                    continue
+                if normalized_part.startswith(normalized_meipass + os.sep):
+                    continue
+                cleaned_parts.append(part)
+            env["PATH"] = os.pathsep.join(cleaned_parts)
 
     try:
-        # Запустить процесс через shell для корректной обработки кавычек
         # Использовать cp866 (OEM кодировка русской консоли)
         result = subprocess.run(
             cmd,
-            shell=True,
+            shell=False,
             capture_output=True,
             text=True,
             encoding='cp866',  # OEM кодировка Windows для русского языка
             errors='replace',
+            cwd=iw_dir or None,
+            env=env,
             timeout=300  # 5 минут таймаут
         )
 
@@ -116,7 +158,7 @@ def run_imposition_wizard(iw_path: str, preset_name: str,
                 # Копировать входной файл в выходной если обработка не удалась
                 import shutil
                 try:
-                    shutil.copy2(pdf_path, output_pdf)
+                    shutil.copy2(input_pdf, output_pdf)
                     logger.info(f"Файл скопирован без обработки: {output_pdf}")
                     return output_pdf
                 except Exception as copy_err:
