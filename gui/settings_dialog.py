@@ -567,7 +567,17 @@ class SettingsDialog(QDialog):
             config.add_folder(folder_config)
             self.load_data()
     
-    def edit_folder(self, item: QListWidgetItem):
+    def edit_folder(self, item=None):
+        # `clicked` signal sends bool, while list double-click sends QListWidgetItem.
+        if isinstance(item, bool) or item is None:
+            item = self.folders_list.currentItem()
+
+        if not isinstance(item, QListWidgetItem):
+            QMessageBox.information(
+                self, "Информация", "Выберите папку для редактирования"
+            )
+            return
+
         folder_name = item.data(Qt.UserRole)
         folder_config = next(
             (f for f in config.folders if f.name == folder_name), 
