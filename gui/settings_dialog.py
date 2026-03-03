@@ -8,10 +8,11 @@ from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QGroupBox, QLabel,
     QLineEdit, QPushButton, QListWidget, QListWidgetItem,
     QCheckBox, QFileDialog, QMessageBox, QFormLayout,
-    QDialogButtonBox, QTabWidget, QWidget
+    QDialogButtonBox, QTabWidget, QWidget, QComboBox
 )
 from PyQt5.QtCore import Qt
-from PyQt5.QtGui import QColor, QPixmap, QIcon
+from PyQt5.QtGui import QColor, QPixmap
+from PyQt5.QtPrintSupport import QPrinterInfo
 
 from config import config, FolderConfig
 from autostart import update_auto_start
@@ -23,13 +24,14 @@ class FolderEditDialog(QDialog):
     def __init__(self, folder_config: FolderConfig = None, parent=None):
         super().__init__(parent)
         self.folder_config = folder_config
+        self.available_printers = []
         self.setup_ui()
         
         if folder_config:
             self.load_data()
     
     def setup_ui(self):
-        self.setWindowTitle("📁 Добавить папку" if not self.folder_config else "📁 Редактировать папку")
+        self.setWindowTitle("Добавить папку" if not self.folder_config else "Редактировать папку")
         self.setModal(True)
         self.setMinimumWidth(500)
 
@@ -39,7 +41,7 @@ class FolderEditDialog(QDialog):
 
         # Заголовок
         title = QLabel("Настройки папки" if not self.folder_config else "Редактирование папки")
-        title.setStyleSheet("font-size: 16px; font-weight: bold; color: #318ce7;")
+        title.setStyleSheet("font-size: 16px; font-weight: 600; color: #0f3d63;")
         title.setAlignment(Qt.AlignCenter)
         layout.addWidget(title)
 
@@ -51,18 +53,29 @@ class FolderEditDialog(QDialog):
         # Стиль для полей
         field_style = """
             QLineEdit {
-                border: 1px solid #ddd;
-                border-radius: 4px;
+                border: 1px solid #cbd5df;
+                border-radius: 8px;
                 padding: 8px;
                 background-color: white;
                 font-size: 13px;
             }
+            QComboBox {
+                border: 1px solid #cbd5df;
+                border-radius: 8px;
+                padding: 6px;
+                background-color: white;
+                font-size: 13px;
+                min-height: 20px;
+            }
             QLineEdit:focus {
-                border: 1px solid #318ce7;
+                border: 1px solid #2f6fa3;
+            }
+            QComboBox:focus {
+                border: 1px solid #2f6fa3;
             }
             QLabel {
                 font-weight: bold;
-                color: #555;
+                color: #495866;
                 font-size: 13px;
             }
         """
@@ -71,34 +84,50 @@ class FolderEditDialog(QDialog):
         # Название (идентификатор)
         self.name_edit = QLineEdit()
         self.name_edit.setPlaceholderText("Например: A4, A5, единички")
-        form_layout.addRow("📛 Название:", self.name_edit)
+        form_layout.addRow("Название:", self.name_edit)
 
         # Входная папка
         input_layout = QHBoxLayout()
         self.input_edit = QLineEdit()
         self.input_edit.setPlaceholderText("Папка для мониторинга")
-        input_btn = QPushButton("📂")
+        input_btn = QPushButton("...")
         input_btn.setFixedWidth(40)
         input_btn.clicked.connect(self.browse_input)
         input_layout.addWidget(self.input_edit)
         input_layout.addWidget(input_btn)
-        form_layout.addRow("📥 Входная папка:", input_layout)
+        form_layout.addRow("Входная папка:", input_layout)
 
         # Выходная папка
         output_layout = QHBoxLayout()
         self.output_edit = QLineEdit()
         self.output_edit.setPlaceholderText("Папка для результатов")
-        output_btn = QPushButton("📤")
+        output_btn = QPushButton("...")
         output_btn.setFixedWidth(40)
         output_btn.clicked.connect(self.browse_output)
         output_layout.addWidget(self.output_edit)
         output_layout.addWidget(output_btn)
-        form_layout.addRow("📤 Выходная папка:", output_layout)
+        form_layout.addRow("Выходная папка:", output_layout)
 
         # Имя пресета
         self.preset_edit = QLineEdit()
         self.preset_edit.setPlaceholderText("Например: My Preset Name")
-        form_layout.addRow("🎯 Пресет Imposition:", self.preset_edit)
+        form_layout.addRow("Пресет Imposition:", self.preset_edit)
+
+        # Принтер
+        printer_layout = QHBoxLayout()
+        self.printer_combo = QComboBox()
+        self.printer_combo.setEditable(True)
+        self.printer_combo.setInsertPolicy(QComboBox.NoInsert)
+        self.printer_combo.setPlaceholderText("Выберите принтер")
+        self.reload_printers()
+
+        printer_reload_btn = QPushButton("↻")
+        printer_reload_btn.setFixedWidth(40)
+        printer_reload_btn.clicked.connect(self.reload_printers)
+
+        printer_layout.addWidget(self.printer_combo)
+        printer_layout.addWidget(printer_reload_btn)
+        form_layout.addRow("Принтер:", printer_layout)
 
         # Разделитель
         line = QWidget()
@@ -108,13 +137,13 @@ class FolderEditDialog(QDialog):
         layout.addWidget(line, alignment=Qt.AlignCenter)
 
         # Включено
-        self.enabled_check = QCheckBox("✅ Включить мониторинг")
+        self.enabled_check = QCheckBox("Включить мониторинг")
         self.enabled_check.setChecked(True)
         self.enabled_check.setStyleSheet("font-size: 13px; padding: 5px;")
         layout.addWidget(self.enabled_check)
 
         # Удалять исходный файл
-        self.delete_check = QCheckBox("🗑️ Удалять исходный файл после обработки")
+        self.delete_check = QCheckBox("Удалять исходный файл после обработки")
         self.delete_check.setChecked(False)
         self.delete_check.setStyleSheet("font-size: 13px; padding: 5px;")
         layout.addWidget(self.delete_check)
@@ -125,8 +154,8 @@ class FolderEditDialog(QDialog):
         buttons = QDialogButtonBox(
             QDialogButtonBox.Ok | QDialogButtonBox.Cancel
         )
-        buttons.button(QDialogButtonBox.Ok).setText("💾 Сохранить")
-        buttons.button(QDialogButtonBox.Cancel).setText("❌ Отмена")
+        buttons.button(QDialogButtonBox.Ok).setText("Сохранить")
+        buttons.button(QDialogButtonBox.Cancel).setText("Отмена")
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
@@ -144,12 +173,41 @@ class FolderEditDialog(QDialog):
         )
         if folder:
             self.output_edit.setText(folder)
+
+    def _load_installed_printers(self):
+        """Прочитать список принтеров через Qt без проблем кодировки."""
+        try:
+            printers = [name.strip() for name in QPrinterInfo.availablePrinterNames() if name and name.strip()]
+            return sorted(set(printers), key=str.lower)
+        except Exception:
+            return []
+
+    def reload_printers(self):
+        selected = self.printer_combo.currentText().strip() if hasattr(self, "printer_combo") else ""
+        self.available_printers = self._load_installed_printers()
+
+        self.printer_combo.blockSignals(True)
+        self.printer_combo.clear()
+        if self.available_printers:
+            self.printer_combo.addItems(self.available_printers)
+        self.printer_combo.blockSignals(False)
+
+        if selected:
+            if self.printer_combo.findText(selected, Qt.MatchExactly) == -1:
+                self.printer_combo.addItem(selected)
+            self.printer_combo.setCurrentText(selected)
     
     def load_data(self):
         self.name_edit.setText(self.folder_config.name)
         self.input_edit.setText(self.folder_config.input_path)
         self.output_edit.setText(self.folder_config.output_path)
         self.preset_edit.setText(self.folder_config.preset_name)
+        self.reload_printers()
+        printer_name = getattr(self.folder_config, "printer_name", "")
+        if printer_name:
+            if self.printer_combo.findText(printer_name, Qt.MatchExactly) == -1:
+                self.printer_combo.addItem(printer_name)
+            self.printer_combo.setCurrentText(printer_name)
         self.enabled_check.setChecked(self.folder_config.enabled)
         self.delete_check.setChecked(self.folder_config.delete_original)
 
@@ -159,6 +217,7 @@ class FolderEditDialog(QDialog):
             input_path=self.input_edit.text().strip(),
             output_path=self.output_edit.text().strip(),
             preset_name=self.preset_edit.text().strip(),
+            printer_name=self.printer_combo.currentText().strip(),
             enabled=self.enabled_check.isChecked(),
             delete_original=self.delete_check.isChecked()
         )
@@ -180,6 +239,10 @@ class FolderEditDialog(QDialog):
         if not self.preset_edit.text().strip():
             QMessageBox.warning(self, "Ошибка", "Введите имя пресета")
             return
+
+        if not self.printer_combo.currentText().strip():
+            QMessageBox.warning(self, "Ошибка", "Выберите принтер")
+            return
         
         super().accept()
 
@@ -196,100 +259,100 @@ class SettingsDialog(QDialog):
 
     def apply_styles(self):
         """Применить современные стили."""
-        # Основной стиль окна
         self.setStyleSheet("""
             QDialog {
-                background-color: #f5f5f5;
+                background-color: #eef2f7;
+                font-family: "Segoe UI";
             }
             QTabWidget::pane {
-                border: 1px solid #ddd;
+                border: 1px solid #cbd5df;
                 background-color: white;
-                border-radius: 8px;
+                border-radius: 10px;
             }
             QTabBar::tab {
-                background-color: #e0e0e0;
-                color: #333;
-                padding: 10px 20px;
-                margin-right: 2px;
-                border-top-left-radius: 8px;
-                border-top-right-radius: 8px;
+                background-color: #dce5ee;
+                color: #304152;
+                padding: 9px 16px;
+                margin-right: 4px;
+                border-top-left-radius: 6px;
+                border-top-right-radius: 6px;
             }
             QTabBar::tab:selected {
                 background-color: white;
-                color: #318ce7;
-                font-weight: bold;
+                color: #1f5a89;
+                font-weight: 600;
             }
             QTabBar::tab:hover {
-                background-color: #f0f0f0;
+                background-color: #e8eef5;
             }
             QListWidget {
-                border: 1px solid #ddd;
-                border-radius: 4px;
+                border: 1px solid #cbd5df;
+                border-radius: 10px;
                 background-color: white;
-                padding: 8px;
+                padding: 6px;
             }
             QListWidget::item {
-                padding: 8px;
-                border-radius: 4px;
+                padding: 10px 8px;
+                border-radius: 8px;
             }
             QListWidget::item:selected {
-                background-color: #318ce7;
+                background-color: #2f6fa3;
                 color: white;
             }
             QListWidget::item:hover {
-                background-color: #e3f2fd;
+                background-color: #edf5fc;
             }
             QPushButton {
-                background-color: #318ce7;
+                background-color: #2f6fa3;
                 color: white;
                 border: none;
-                padding: 8px 16px;
-                border-radius: 4px;
-                font-weight: bold;
+                padding: 8px 14px;
+                border-radius: 8px;
+                font-weight: 600;
             }
             QPushButton:hover {
-                background-color: #1976d2;
+                background-color: #255a84;
             }
             QPushButton:pressed {
-                background-color: #0d47a1;
+                background-color: #1f4a6d;
             }
             QPushButton:disabled {
-                background-color: #bdbdbd;
+                background-color: #b8c3cf;
             }
             QLineEdit {
-                border: 1px solid #ddd;
-                border-radius: 4px;
+                border: 1px solid #cbd5df;
+                border-radius: 8px;
                 padding: 8px;
                 background-color: white;
             }
             QLineEdit:focus {
-                border: 1px solid #318ce7;
+                border: 1px solid #2f6fa3;
             }
             QCheckBox {
                 spacing: 8px;
-                color: #333;
+                color: #2b3b48;
             }
             QCheckBox::indicator {
                 width: 18px;
                 height: 18px;
-                border: 1px solid #ddd;
-                border-radius: 3px;
+                border: 1px solid #cbd5df;
+                border-radius: 4px;
                 background-color: white;
             }
             QCheckBox::indicator:checked {
-                background-color: #318ce7;
-                border-color: #318ce7;
+                background-color: #2f6fa3;
+                border-color: #2f6fa3;
             }
             QCheckBox::indicator:hover {
-                border-color: #318ce7;
+                border-color: #2f6fa3;
             }
             QLabel {
-                color: #333;
+                color: #2b3b48;
             }
             QGroupBox {
-                font-weight: bold;
-                border: 1px solid #ddd;
-                border-radius: 4px;
+                font-weight: 600;
+                border: 1px solid #cbd5df;
+                border-radius: 8px;
                 margin-top: 10px;
                 padding-top: 10px;
             }
@@ -297,11 +360,11 @@ class SettingsDialog(QDialog):
                 subcontrol-origin: margin;
                 left: 10px;
                 padding: 0 5px;
-                color: #318ce7;
+                color: #1f5a89;
             }
             QDialogButtonBox button {
                 min-width: 80px;
-                padding: 8px 20px;
+                padding: 8px 18px;
             }
         """)
 
@@ -315,12 +378,12 @@ class SettingsDialog(QDialog):
         layout.setContentsMargins(20, 20, 20, 20)
 
         # Заголовок
-        title_label = QLabel("🖨️ Hot Folders — Настройки")
+        title_label = QLabel("Hot Folders")
         title_label.setStyleSheet("""
-            font-size: 18px;
-            font-weight: bold;
-            color: #318ce7;
-            padding: 10px;
+            font-size: 22px;
+            font-weight: 700;
+            color: #1f5a89;
+            padding: 4px 0 8px 0;
         """)
         title_label.setAlignment(Qt.AlignCenter)
         layout.addWidget(title_label)
@@ -342,8 +405,8 @@ class SettingsDialog(QDialog):
         folders_layout.setContentsMargins(10, 10, 10, 10)
 
         # Заголовок вкладки
-        folder_title = QLabel("📁 Папки для мониторинга")
-        folder_title.setStyleSheet("font-size: 14px; font-weight: bold; color: #318ce7; padding: 5px;")
+        folder_title = QLabel("Папки для мониторинга")
+        folder_title.setStyleSheet("font-size: 14px; font-weight: 600; color: #1f5a89; padding: 2px 0 4px 0;")
         folders_layout.addWidget(folder_title)
 
         # Список папок
@@ -355,22 +418,22 @@ class SettingsDialog(QDialog):
         # Кнопки управления папками
         btn_layout = QHBoxLayout()
 
-        self.add_btn = QPushButton("➕ Добавить")
+        self.add_btn = QPushButton("Добавить")
         self.add_btn.clicked.connect(self.add_folder)
         btn_layout.addWidget(self.add_btn)
 
-        self.edit_btn = QPushButton("✏️ Изменить")
+        self.edit_btn = QPushButton("Изменить")
         self.edit_btn.clicked.connect(self.edit_folder)
         btn_layout.addWidget(self.edit_btn)
 
-        self.remove_btn = QPushButton("🗑️ Удалить")
+        self.remove_btn = QPushButton("Удалить")
         self.remove_btn.clicked.connect(self.remove_folder)
         btn_layout.addWidget(self.remove_btn)
 
         btn_layout.addStretch()
         folders_layout.addLayout(btn_layout)
 
-        tabs.addTab(folders_widget, "📁 Папки")
+        tabs.addTab(folders_widget, "Папки")
         
         # Вкладка общих настроек
         general_widget = QWidget()
@@ -378,8 +441,8 @@ class SettingsDialog(QDialog):
         general_layout.setContentsMargins(10, 10, 10, 10)
 
         # Заголовок
-        general_title = QLabel("⚙️ Общие настройки")
-        general_title.setStyleSheet("font-size: 14px; font-weight: bold; color: #318ce7; padding: 5px;")
+        general_title = QLabel("Общие настройки")
+        general_title.setStyleSheet("font-size: 14px; font-weight: 600; color: #1f5a89; padding: 2px 0 4px 0;")
         general_layout.addWidget(general_title)
 
         # Группа для ImpositionWizard
@@ -390,14 +453,14 @@ class SettingsDialog(QDialog):
         self.iw_path_edit = QLineEdit()
         self.iw_path_edit.setPlaceholderText("Путь к ImpositionWizard.exe")
         self.iw_path_edit.textChanged.connect(self.validate_iw_path)
-        iw_btn = QPushButton("📂 Обзор")
+        iw_btn = QPushButton("Обзор")
         iw_btn.clicked.connect(self.browse_iw)
         iw_path_layout.addWidget(self.iw_path_edit)
         iw_path_layout.addWidget(iw_btn)
         iw_group_layout.addLayout(iw_path_layout)
         
         # Кнопка проверки
-        self.iw_test_btn = QPushButton("✅ Проверить")
+        self.iw_test_btn = QPushButton("Проверить")
         self.iw_test_btn.clicked.connect(self.test_iw_path)
         iw_group_layout.addWidget(self.iw_test_btn)
         
@@ -410,13 +473,13 @@ class SettingsDialog(QDialog):
         general_layout.addWidget(iw_group)
 
         # Автозапуск
-        self.auto_start_check = QCheckBox("🚀 Запускать при старте Windows")
+        self.auto_start_check = QCheckBox("Запускать при старте Windows")
         self.auto_start_check.setStyleSheet("padding: 10px; font-size: 13px;")
         general_layout.addWidget(self.auto_start_check)
         
         general_layout.addStretch()
 
-        tabs.addTab(general_widget, "⚙️ Общие")
+        tabs.addTab(general_widget, "Общие")
 
         layout.addWidget(tabs)
 
@@ -424,8 +487,8 @@ class SettingsDialog(QDialog):
         buttons = QDialogButtonBox(
             QDialogButtonBox.Ok | QDialogButtonBox.Cancel
         )
-        buttons.button(QDialogButtonBox.Ok).setText("💾 Сохранить")
-        buttons.button(QDialogButtonBox.Cancel).setText("❌ Отмена")
+        buttons.button(QDialogButtonBox.Ok).setText("Сохранить")
+        buttons.button(QDialogButtonBox.Cancel).setText("Отмена")
         buttons.accepted.connect(self.save_data)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
@@ -440,7 +503,7 @@ class SettingsDialog(QDialog):
 
     def load_logo(self):
         """Загрузить логотип типографии."""
-        from PyQt5.QtGui import QPixmap, QIcon
+        from PyQt5.QtGui import QPixmap
         
         # Поиск логотипа в папке проекта
         logo_paths = [
@@ -528,16 +591,20 @@ class SettingsDialog(QDialog):
         # Загрузить папки
         self.folders_list.clear()
         for folder in config.folders:
-            status_icon = "✅" if folder.enabled else "❌"
-            delete_icon = "🗑️" if folder.delete_original else ""
+            printer_name = getattr(folder, "printer_name", "").strip() or "не выбран"
             
             # Создать элемент с красивым форматированием
-            item = QListWidgetItem(f"{status_icon} {folder.name}")
+            item_title = folder.name if folder.enabled else f"{folder.name} (отключено)"
+            item = QListWidgetItem(item_title)
             item.setData(Qt.UserRole, folder.name)
             
             # Добавить вторую строку с информацией
-            info_text = f"📁 {folder.preset_name} {delete_icon}"
-            item.setToolTip(f"{folder.input_path}\n⬇\n{folder.output_path}\n\nПресет: {folder.preset_name}\nУдаление: {'включено' if folder.delete_original else 'отключено'}")
+            item.setToolTip(
+                f"{folder.input_path}\n⬇\n{folder.output_path}\n\n"
+                f"Пресет: {folder.preset_name}\n"
+                f"Принтер: {printer_name}\n"
+                f"Удаление: {'включено' if folder.delete_original else 'отключено'}"
+            )
             
             if not folder.enabled:
                 item.setForeground(QColor("#999"))

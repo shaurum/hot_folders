@@ -14,12 +14,13 @@ class FolderConfig:
     """Конфигурация одной папки для мониторинга."""
 
     def __init__(self, name: str, input_path: str, output_path: str,
-                 preset_name: str, enabled: bool = True,
-                 delete_original: bool = False):
+                 preset_name: str, printer_name: str = "",
+                 enabled: bool = True, delete_original: bool = False):
         self.name = name  # Идентификатор папки (напр. "A4", "A5")
         self.input_path = input_path  # Путь к входной папке
         self.output_path = output_path  # Путь к выходной папке
         self.preset_name = preset_name  # Имя пресета ImpositionWizard
+        self.printer_name = printer_name  # Имя принтера для печати результата
         self.enabled = enabled  # Включена ли папка
         self.delete_original = delete_original  # Удалять исходный файл
 
@@ -29,6 +30,7 @@ class FolderConfig:
             "input_path": self.input_path,
             "output_path": self.output_path,
             "preset_name": self.preset_name,
+            "printer_name": self.printer_name,
             "enabled": self.enabled,
             "delete_original": self.delete_original
         }
@@ -40,6 +42,7 @@ class FolderConfig:
             input_path=data["input_path"],
             output_path=data["output_path"],
             preset_name=data["preset_name"],
+            printer_name=data.get("printer_name", ""),
             enabled=data.get("enabled", True),
             delete_original=data.get("delete_original", False)
         )

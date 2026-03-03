@@ -6,8 +6,13 @@ import os
 import sys
 import subprocess
 import tempfile
+import ctypes
+import shutil
+import time
+import threading
 from pathlib import Path
 from typing import Optional
+from ctypes import wintypes
 from PIL import Image
 
 from logger import get_logger
@@ -22,6 +27,184 @@ PDF_EXTENSION = '.pdf'
 class ProcessorError(Exception):
     """Ошибка обработки файла."""
     pass
+
+
+class PRINTER_INFO_2(ctypes.Structure):
+    _fields_ = [
+        ("pServerName", wintypes.LPWSTR),
+        ("pPrinterName", wintypes.LPWSTR),
+        ("pShareName", wintypes.LPWSTR),
+        ("pPortName", wintypes.LPWSTR),
+        ("pDriverName", wintypes.LPWSTR),
+        ("pComment", wintypes.LPWSTR),
+        ("pLocation", wintypes.LPWSTR),
+        ("pDevMode", wintypes.LPVOID),
+        ("pSepFile", wintypes.LPWSTR),
+        ("pPrintProcessor", wintypes.LPWSTR),
+        ("pDatatype", wintypes.LPWSTR),
+        ("pParameters", wintypes.LPWSTR),
+        ("pSecurityDescriptor", wintypes.LPVOID),
+        ("Attributes", wintypes.DWORD),
+        ("Priority", wintypes.DWORD),
+        ("DefaultPriority", wintypes.DWORD),
+        ("StartTime", wintypes.DWORD),
+        ("UntilTime", wintypes.DWORD),
+        ("Status", wintypes.DWORD),
+        ("cJobs", wintypes.DWORD),
+        ("AveragePPM", wintypes.DWORD),
+    ]
+
+
+PRINTER_STATUS_PAUSED = 0x00000001
+PRINTER_STATUS_ERROR = 0x00000002
+PRINTER_STATUS_PAPER_OUT = 0x00000010
+PRINTER_STATUS_OFFLINE = 0x00000080
+PRINTER_STATUS_USER_INTERVENTION = 0x00100000
+PRINTER_STATUS_NOT_AVAILABLE = 0x00001000
+
+
+def _get_printer_status(printer_name: str) -> int:
+    """Получить статус принтера через WinAPI."""
+    winspool = ctypes.WinDLL("winspool.drv", use_last_error=True)
+    open_printer = winspool.OpenPrinterW
+    open_printer.argtypes = [wintypes.LPWSTR, ctypes.POINTER(wintypes.HANDLE), wintypes.LPVOID]
+    open_printer.restype = wintypes.BOOL
+
+    get_printer = winspool.GetPrinterW
+    get_printer.argtypes = [
+        wintypes.HANDLE,
+        wintypes.DWORD,
+        wintypes.LPBYTE,
+        wintypes.DWORD,
+        ctypes.POINTER(wintypes.DWORD),
+    ]
+    get_printer.restype = wintypes.BOOL
+
+    close_printer = winspool.ClosePrinter
+    close_printer.argtypes = [wintypes.HANDLE]
+    close_printer.restype = wintypes.BOOL
+
+    handle = wintypes.HANDLE()
+    if not open_printer(printer_name, ctypes.byref(handle), None):
+        error_code = ctypes.get_last_error()
+        raise ProcessorError(
+            f"Принтер '{printer_name}' недоступен (OpenPrinterW error={error_code})"
+        )
+
+    try:
+        needed = wintypes.DWORD(0)
+        get_printer(handle, 2, None, 0, ctypes.byref(needed))
+        if needed.value == 0:
+            error_code = ctypes.get_last_error()
+            raise ProcessorError(
+                f"Не удалось прочитать статус принтера '{printer_name}' (GetPrinterW error={error_code})"
+            )
+
+        buffer = ctypes.create_string_buffer(needed.value)
+        if not get_printer(
+            handle,
+            2,
+            ctypes.cast(buffer, wintypes.LPBYTE),
+            needed.value,
+            ctypes.byref(needed),
+        ):
+            error_code = ctypes.get_last_error()
+            raise ProcessorError(
+                f"Не удалось получить статус принтера '{printer_name}' (GetPrinterW error={error_code})"
+            )
+
+        info = ctypes.cast(buffer, ctypes.POINTER(PRINTER_INFO_2)).contents
+        return int(info.Status)
+    finally:
+        close_printer(handle)
+
+
+def _ensure_printer_available(printer_name: str):
+    status = _get_printer_status(printer_name)
+    bad_flags = (
+        PRINTER_STATUS_PAUSED
+        | PRINTER_STATUS_ERROR
+        | PRINTER_STATUS_PAPER_OUT
+        | PRINTER_STATUS_OFFLINE
+        | PRINTER_STATUS_USER_INTERVENTION
+        | PRINTER_STATUS_NOT_AVAILABLE
+    )
+    if status & bad_flags:
+        raise ProcessorError(
+            f"Принтер '{printer_name}' недоступен (status=0x{status:08X})"
+        )
+
+
+def print_pdf_to_printer(pdf_path: Path, printer_name: str):
+    """
+    Отправить PDF на указанный принтер.
+
+    Используется ShellExecute с операцией printto, поэтому печать зависит
+    от приложения по умолчанию для PDF в Windows.
+    """
+    printer_name = (printer_name or "").strip()
+    if not printer_name:
+        raise ProcessorError("Не указан принтер для печати")
+
+    _ensure_printer_available(printer_name)
+
+    shell32 = ctypes.WinDLL("shell32", use_last_error=True)
+    shell_execute = shell32.ShellExecuteW
+    shell_execute.argtypes = [
+        wintypes.HWND,
+        wintypes.LPCWSTR,
+        wintypes.LPCWSTR,
+        wintypes.LPCWSTR,
+        wintypes.LPCWSTR,
+        ctypes.c_int,
+    ]
+    shell_execute.restype = wintypes.HINSTANCE
+
+    result = shell_execute(
+        None,
+        "printto",
+        str(pdf_path),
+        f'"{printer_name}"',
+        None,
+        0,
+    )
+    if isinstance(result, int):
+        result_code = result
+    else:
+        result_code = ctypes.cast(result, ctypes.c_void_p).value or 0
+    if result_code <= 32:
+        raise ProcessorError(
+            f"Не удалось отправить файл на принтер '{printer_name}' (ShellExecute={result_code})"
+        )
+
+    logger.info(f"Файл отправлен на принтер '{printer_name}': {pdf_path}")
+
+
+def _schedule_file_delete(file_path: Path, delay_seconds: int = 180):
+    """Удалить файл с задержкой в фоне, чтобы печатающее приложение успело открыть его."""
+    def _delete_later():
+        try:
+            time.sleep(delay_seconds)
+            if file_path.exists():
+                file_path.unlink()
+                logger.debug(f"Удалён временный файл печати: {file_path}")
+        except Exception as e:
+            logger.warning(f"Не удалось удалить временный файл печати {file_path}: {e}")
+
+    threading.Thread(target=_delete_later, daemon=True).start()
+
+
+def _move_to_print_spool_temp(pdf_path: Path) -> Path:
+    """
+    Переместить PDF во временную папку печати.
+    Это позволяет не держать файл в output-папке и не ломать печать.
+    """
+    temp_dir = Path(tempfile.gettempdir()) / "hot_folders_print_spool"
+    temp_dir.mkdir(parents=True, exist_ok=True)
+    temp_name = f"{pdf_path.stem}_{time.time_ns()}.pdf"
+    temp_pdf = temp_dir / temp_name
+    shutil.move(str(pdf_path), str(temp_pdf))
+    return temp_pdf
 
 
 def convert_image_to_pdf(image_path: Path, output_path: Optional[Path] = None) -> Path:
@@ -231,6 +414,7 @@ def process_file(file_path: Path, folder_config, iw_path: str,
 
     # Создать имя выходного файла
     output_pdf = output_dir / f"{file_path.stem}_imposed.pdf"
+    processing_completed = False
 
     try:
         # Вызвать ImpositionWizard
@@ -242,10 +426,32 @@ def process_file(file_path: Path, folder_config, iw_path: str,
             output_pdf=output_pdf
         )
 
+        printer_name = getattr(folder_config, "printer_name", "").strip()
+        if printer_name:
+            print_source = result
+            try:
+                if result.exists():
+                    print_source = _move_to_print_spool_temp(result)
+                    logger.info(
+                        f"Итоговый PDF перенесён во временную папку печати: {print_source}"
+                    )
+            except Exception as move_err:
+                logger.warning(
+                    f"Не удалось перенести PDF во временную папку печати, печатаю из output: {move_err}"
+                )
+
+            print_pdf_to_printer(print_source, printer_name)
+            _schedule_file_delete(print_source, delay_seconds=180)
+        else:
+            logger.warning(
+                f"Для папки '{folder_config.name}' не выбран принтер, печать пропущена"
+            )
+
+        processing_completed = True
         return result
     finally:
         # Удалить исходный файл если указано (после успешной обработки)
-        if delete_original and file_path.exists():
+        if delete_original and processing_completed and file_path.exists():
             try:
                 file_path.unlink()
                 logger.info(f"Удалён исходный файл: {file_path}")
