@@ -199,8 +199,19 @@ class WatchdogManager:
                 on_success=self.on_success,
                 on_error=self.on_error
             )
-            watcher.start()
-            self.watchers[folder_config.name] = watcher
+            try:
+                watcher.start()
+                self.watchers[folder_config.name] = watcher
+            except Exception as e:
+                logger.error(
+                    f"Не удалось запустить мониторинг папки '{folder_config.name}': {e}"
+                )
+                if self.on_error:
+                    self.on_error(
+                        Path(folder_config.input_path),
+                        f"Не удалось запустить мониторинг папки: {e}",
+                        folder_config.name
+                    )
     
     def remove_folder(self, name: str):
         """Удалить папку из мониторинга."""
